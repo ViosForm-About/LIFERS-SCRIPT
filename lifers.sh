@@ -1,11 +1,10 @@
 #!/bin/bash
 set -e
 
-# ==========================================================
-# LIFERS SCRIPT v2 - FINAL
-# Cloudflare DNS Validation + Wildcard SSL
-# One Domain Per Install (STRICT)
-# ==========================================================
+# ================================
+# LIFERS SCRIPT
+# SSL & Certificate Manager
+# ================================
 
 clear
 
@@ -15,92 +14,106 @@ YELLOW="\033[1;33m"
 CYAN="\033[0;36m"
 RESET="\033[0m"
 
-LOCK_FILE="/tmp/lifers_script.lock"
+# ===== BANNER =====
+cat assets/banner.txt 2>/dev/null || echo "LIFERS SCRIPT"
 
-# ===== SINGLE RUN LOCK =====
-if [ -f "$LOCK_FILE" ]; then
-  echo -e "${RED}Another LIFERS SCRIPT process is running.${RESET}"
-  exit 1
-fi
-touch "$LOCK_FILE"
-trap "rm -f $LOCK_FILE" EXIT
-
-# ===== LOAD BANNER =====
-if [ -f assets/banner.txt ]; then
-  cat assets/banner.txt
-else
-  echo "LIFERS SCRIPT v2"
-fi
-
+# ===== MENU =====
+echo ""
+echo -e "${YELLOW}[1] Create SSL (Nginx + Certbot)"
+echo "[2] Create Certificate Only"
+echo "[3] Uninstall SSL"
+echo "[4] Uninstall Certificate"
+echo "[0] Exit${RESET}"
 echo ""
 
-# ===== CHECK ROOT =====
-if [ "$EUID" -ne 0 ]; then
-  echo -e "${RED}Run this script as root.${RESET}"
-  exit 1
+read -p "Select option: " MENU
+
+# ===== INPUT DOMAIN =====
+if [[ "$MENU" != "0" ]]; then
+  read -p "Enter domain/subdomain (without http/https): " DOMAIN
 fi
 
-# ===== CHECK DEPENDENCIES =====
-for cmd in nginx certbot curl; do
-  if ! command -v $cmd >/dev/null 2>&1; then
-    echo -e "${YELLOW}Installing missing dependency: $cmd${RESET}"
-    apt update -y
-    apt install -y $cmd
+NGINX_CONF="/etc/nginx/sites-available/$DOMAIN"
+
+# ================================
+# FUNCTION: CREATE SSL
+# ================================
+create_ssl() {
+  echo -e "${CYAN}Creating Nginx config...${RESET}"
+
+  if [ -f "$NGINX_CONF" ]; then
+    echo -e "${RED}Config already exists.${RESET}"
+    cat assets/error.txt
+    exit 1
   fi
-done
 
-# ===== USER INPUT =====
-read -p "Enter root domain (example.com): " DOMAIN
-read -p "Enter Cloudflare API Token: " CF_TOKEN
-read -p "Enter email for SSL registration: " EMAIL
+cat <<EOF > "$NGINX_CONF"
+server {
+    listen 80;
+    server_name $DOMAIN;
 
-echo ""
-read -p "Create Wildcard SSL for *.$DOMAIN ? (y/n): " CONFIRM
-[ "$CONFIRM" != "y" ] && echo "Cancelled." && exit 0
+    root /var/www/node;
+    index index.html;
 
-# ===== DOMAIN VALIDATION =====
-if [[ "$DOMAIN" =~ [^a-zA-Z0-9.-] ]]; then
-  echo -e "${RED}Invalid domain format.${RESET}"
-  exit 1
-fi
-
-# ===== CLOUDFLARE CREDENTIALS =====
-CF_DIR="/root/.secrets/certbot"
-CF_FILE="$CF_DIR/cloudflare.ini"
-
-mkdir -p "$CF_DIR"
-chmod 700 "$CF_DIR"
-
-cat <<EOF > "$CF_FILE"
-dns_cloudflare_api_token = $CF_TOKEN
+    location / {
+        return 403;
+    }
+}
 EOF
 
-chmod 600 "$CF_FILE"
+  ln -s "$NGINX_CONF" /etc/nginx/sites-enabled/
+  systemctl reload nginx
 
-# ===== INSTALL CLOUDFLARE PLUGIN =====
-if ! certbot plugins | grep -q cloudflare; then
-  echo -e "${CYAN}Installing Cloudflare DNS plugin...${RESET}"
-  apt install -y python3-certbot-dns-cloudflare
-fi
+  echo -e "${CYAN}Requesting SSL...${RESET}"
+  certbot --nginx -d "$DOMAIN"
 
-# ===== REQUEST WILDCARD SSL =====
-echo -e "${CYAN}Requesting Wildcard SSL certificate...${RESET}"
-
-certbot certonly \
-  --dns-cloudflare \
-  --dns-cloudflare-credentials "$CF_FILE" \
-  -d "$DOMAIN" \
-  -d "*.$DOMAIN" \
-  --agree-tos \
-  --non-interactive \
-  -m "$EMAIL"
-
-# ===== RESULT =====
-if [ $? -eq 0 ]; then
-  echo -e "${GREEN}SSL SUCCESSFULLY CREATED.${RESET}"
+  echo -e "${GREEN}SSL successfully created.${RESET}"
   cat assets/success.txt
-else
-  echo -e "${RED}SSL CREATION FAILED.${RESET}"
-  cat assets/error.txt
-  exit 1
-fi
+}
+
+# ================================
+# FUNCTION: CREATE CERT ONLY
+# ================================
+create_cert() {
+  echo -e "${CYAN}Requesting certificate only...${RESET}"
+  certbot certonly --standalone -d "$DOMAIN"
+
+  echo -e "${GREEN}Certificate created successfully.${RESET}"
+  cat assets/success.txt
+}
+
+# ================================
+# FUNCTION: REMOVE SSL
+# ================================
+remove_ssl() {
+  echo -e "${CYAN}Removing SSL...${RESET}"
+  certbot delete --cert-name "$DOMAIN"
+
+  rm -f "/etc/nginx/sites-enabled/$DOMAIN"
+  rm -f "/etc/nginx/sites-available/$DOMAIN"
+  systemctl reload nginx
+
+  echo -e "${GREEN}SSL removed.${RESET}"
+}
+
+# ================================
+# FUNCTION: REMOVE CERT ONLY
+# ================================
+remove_cert() {
+  echo -e "${CYAN}Removing certificate...${RESET}"
+  certbot delete --cert-name "$DOMAIN"
+
+  echo -e "${GREEN}Certificate removed.${RESET}"
+}
+
+# ================================
+# EXECUTION
+# ================================
+case $MENU in
+  1) create_ssl ;;
+  2) create_cert ;;
+  3) remove_ssl ;;
+  4) remove_cert ;;
+  0) exit 0 ;;
+  *) echo -e "${RED}Invalid option.${RESET}" ;;
+esac
