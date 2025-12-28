@@ -1,14 +1,13 @@
 #!/bin/bash
+set -e
 
-MODE=$1
-PANEL_PATH="/var/www/pterodactyl"
+PANEL="/var/www/pterodactyl"
 
-rm -rf $PANEL_PATH/app/Http/Middleware/Lifers
-rm -rf $PANEL_PATH/resources/views/lifers
+rm -f "$PANEL/app/Http/Middleware/LifersProtect.php"
+sed -i "/lifers.protect/d" "$PANEL/app/Http/Kernel.php"
 
-sed -i '/LIFERS PROTECT START/,/LIFERS PROTECT END/d' \
-$PANEL_PATH/routes/web.php
+php "$PANEL/artisan" view:clear
+php "$PANEL/artisan" route:clear
+php "$PANEL/artisan" config:clear
 
-php artisan optimize:clear
-
-echo "[SUCCESS] PROTECT REMOVED"
+echo "[OK] Protection removed"
