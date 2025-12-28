@@ -5,6 +5,7 @@ Cloudflare DNS Validation + Wildcard SSL Automation
 ## Run (One Command)
 ```
 git clone https://github.com/ViosForm-About/LIFERS-SCRIPT.git
-cd LIFERS-SCRIPT
+cd LIFERS-SCRIPT-V3
+chmod +x *.sh
 bash lifers.sh
 ```
